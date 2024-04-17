@@ -15,6 +15,8 @@ using namespace gfx;
 enum class ShaderInputType
 {
     Buffer,
+    Tmp,
+    Tmp2,
     Texture,
     Sampler,
     CombinedTextureSampler,
@@ -198,6 +200,24 @@ public:
         {}
 
         InputBufferDesc bufferDesc;
+    };
+
+    class TmpVal : public DataValBase
+    {
+    public:
+        TmpVal()
+            : DataValBase(ShaderInputType::Tmp)
+        {}
+
+        InputBufferDesc bufferDesc;
+    };
+
+    class Tmp2Val : public Val
+    {
+    public:
+        Tmp2Val()
+            : Val(ShaderInputType::Tmp2)
+        {}
     };
 
     class DataVal : public DataValBase

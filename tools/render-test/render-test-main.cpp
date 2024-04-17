@@ -150,6 +150,8 @@ protected:
     ShaderOutputPlan m_outputPlan;
 };
 
+uint64_t device_address = 0;
+
 struct AssignValsFromLayoutContext
 {
     IDevice*                device;
@@ -257,6 +259,90 @@ struct AssignValsFromLayoutContext
         auto bufferView = device->createBufferView(bufferResource, counterResource, viewDesc);
         dstCursor.setResource(bufferView);
         maybeAddOutput(dstCursor, srcVal, bufferResource);
+
+        return SLANG_OK;
+    }
+
+    // Copied from assignBuffer.
+    SlangResult assignTmp(ShaderCursor const& dstCursor, ShaderInputLayout::TmpVal* srcVal)
+    {
+        const InputBufferDesc& srcBuffer = srcVal->bufferDesc;
+        auto& bufferData = srcVal->bufferData;
+        const size_t bufferSize = bufferData.getCount() * sizeof(uint32_t);
+
+        ComPtr<IBufferResource> bufferResource;
+        SLANG_RETURN_ON_FAIL(ShaderRendererUtil::createBufferResource(srcBuffer, /*entry.isOutput,*/ bufferSize, bufferData.getBuffer(), device, bufferResource));
+
+        ComPtr<IBufferResource> counterResource;
+        const auto explicitCounterCursor = dstCursor.getExplicitCounter();
+        if(srcBuffer.counter != ~0u)
+        {
+            if(explicitCounterCursor.isValid())
+            {
+                // If this cursor has a full buffer object associated with the
+                // resource, then assign to that.
+                ShaderInputLayout::BufferVal counterVal;
+                counterVal.bufferData.add(srcBuffer.counter);
+                assignBuffer(explicitCounterCursor, &counterVal);
+            }
+            else
+            {
+                // Otherwise, this API (D3D) must be handling the buffer object
+                // specially, in which case create the buffer resource to pass
+                // into `createBufferView`
+                const InputBufferDesc& counterBufferDesc{
+                    InputBufferType::StorageBuffer,
+                    sizeof(uint32_t),
+                    Format::Unknown,
+                };
+                SLANG_RETURN_ON_FAIL(ShaderRendererUtil::createBufferResource(
+                    counterBufferDesc,
+                    sizeof(srcBuffer.counter),
+                    &srcBuffer.counter,
+                    device,
+                    counterResource
+                ));
+            }
+        }
+        else if(explicitCounterCursor.isValid())
+        {
+            // If we know we require a counter for this resource but haven't
+            // been given one, error
+            return SLANG_E_INVALID_ARG;
+        }
+
+        IResourceView::Desc viewDesc = {};
+        viewDesc.type = IResourceView::Type::UnorderedAccess;
+        viewDesc.format = srcBuffer.format;
+        viewDesc.bufferElementSize = srcVal->bufferDesc.stride;
+        auto bufferView = device->createBufferView(bufferResource, counterResource, viewDesc);
+        dstCursor.setResource(bufferView);
+        maybeAddOutput(dstCursor, srcVal, bufferResource);
+
+        device_address = bufferResource->getDeviceAddress();
+        printf("got device address: %zu\n", device_address);
+
+        return SLANG_OK;
+    }
+
+  // Copied from assignData.
+    SlangResult assignTmp2(ShaderCursor const& dstCursor, ShaderInputLayout::Tmp2Val* srcVal)
+    {
+        ShaderCursor dataCursor = dstCursor;
+        switch(dataCursor.getTypeLayout()->getKind())
+        {
+        case slang::TypeReflection::Kind::ConstantBuffer:
+        case slang::TypeReflection::Kind::ParameterBlock:
+            dataCursor = dataCursor.getDereferenced();
+            break;
+
+        default:
+            break;
+
+        }
+
+        printf("setting device address: %zu\n", device_address);
+        SLANG_RETURN_ON_FAIL(dataCursor.setData(&device_address, sizeof(device_address)));
 
         return SLANG_OK;
     }
@@ -448,6 +534,12 @@ struct AssignValsFromLayoutContext
 
         case ShaderInputType::Buffer:
             return assignBuffer(dstCursor, (ShaderInputLayout::BufferVal*) srcVal.Ptr());
+
+        case ShaderInputType::Tmp:
+            return assignTmp(dstCursor, (ShaderInputLayout::TmpVal*) srcVal.Ptr());
+
+        case ShaderInputType::Tmp2:
+            return assignTmp2(dstCursor, (ShaderInputLayout::Tmp2Val*) srcVal.Ptr());
 
         case ShaderInputType::CombinedTextureSampler:
             return assignCombinedTextureSampler(dstCursor, (ShaderInputLayout::CombinedTextureSamplerVal*) srcVal.Ptr());

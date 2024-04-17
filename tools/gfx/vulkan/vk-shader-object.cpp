@@ -37,6 +37,8 @@ const void* ShaderObjectImpl::getRawData() { return m_data.getBuffer(); }
 
 Size ShaderObjectImpl::getSize() { return (Size)m_data.getCount(); }
 
+uint64_t device_address = 0;
+
 // TODO: Change size_t and Index to Size?
 Result ShaderObjectImpl::setData(ShaderOffset const& inOffset, void const* data, size_t inSize)
 {
@@ -61,6 +63,9 @@ Result ShaderObjectImpl::setData(ShaderOffset const& inOffset, void const* data,
     }
 
     memcpy(dest + offset, data, size);
+
+    memcpy(&device_address, data, size);
+    printf("setData this=%p m_data.getCount=%zu size=%zu\n", this, m_data.getCount(), size);
 
     m_isConstantBufferDirty = true;
 
@@ -1016,6 +1021,7 @@ Result EntryPointShaderObject::bindAsEntryPoint(
     //
     // TODO: Can/should this function be renamed as just `bindAsPushConstantBuffer`?
     //
+    printf("bindAsEntryPoint this=%p m_data.getCount=%zu\n", this, m_data.getCount());
     if (m_data.getCount())
     {
         // The index of the push constant range to bind should be
@@ -1048,6 +1054,18 @@ Result EntryPointShaderObject::bindAsEntryPoint(
             pushConstantRange.offset,
             pushConstantRange.size,
             pushConstantData);
+    }
+    // Somehow, I didn't manage to set this, even when targeting the push constants and using setData.
+    else if (device_address)
+    {
+        printf("push constants device address: %zu\n", device_address);
+        encoder->m_api->vkCmdPushConstants(
+            encoder->m_commandBuffer->m_commandBuffer,
+            context.pipelineLayout,
+            VK_SHADER_STAGE_ALL,
+            0,
+            sizeof(device_address),
+            &device_address);
     }
 
     // Any remaining bindings in the object can be handled through the

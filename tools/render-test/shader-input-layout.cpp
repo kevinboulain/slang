@@ -366,6 +366,158 @@ namespace renderer_test
             return SLANG_OK;
         }
 
+      // Copied from parseOption(..., BufferVal)
+        SlangResult parseOption(Misc::TokenReader& parser, String const& word, ShaderInputLayout::TmpVal* val)
+        {
+            if (word == "stride")
+            {
+                parser.Read("=");
+                val->bufferDesc.stride = parser.ReadInt();
+            }
+            else if (word == "counter")
+            {
+                parser.Read("=");
+                val->bufferDesc.counter = parser.ReadInt();
+            }
+            else if (word == "random")
+            {
+                parser.Read("(");
+                // Read the type
+                String type = parser.ReadWord();
+                SlangScalarType scalarType = _getScalarType(type.getUnownedSlice());
+                if (scalarType == SLANG_SCALAR_TYPE_NONE)
+                {
+                    StringBuilder scalarTypeNames;
+                    for (const auto& info : g_scalarTypeInfos)
+                    {
+                        if (scalarTypeNames.getLength() != 0)
+                        {
+                            scalarTypeNames << ", ";
+                        }
+                        scalarTypeNames << info.name;
+                    }
+
+                    throw ShaderInputLayoutFormatException(StringBuilder() << "Expecting " << scalarTypeNames << " " << parser.NextToken().Position.Line);
+                }
+
+                parser.Read(",");
+                const int size = int(parser.ReadUInt());
+
+                switch (scalarType)
+                {
+                    case SLANG_SCALAR_TYPE_INT32:
+                    {
+                        bool hasRange = false;
+
+                        int32_t minValue = -0x7fffffff - 1;
+                        int32_t maxValue = 0x7fffffff;
+
+                        if (parser.LookAhead(","))
+                        {
+                            hasRange = true;
+                            parser.ReadToken();
+                            minValue = parser.ReadInt();
+
+                            if (parser.LookAhead(","))
+                            {
+                                parser.ReadToken();
+                                maxValue = parser.ReadInt();
+                            }
+                        }
+                        SLANG_ASSERT(minValue <= maxValue);
+                        maxValue = (maxValue >= minValue) ? maxValue : minValue;
+
+                        // Generate the data
+                        val->bufferData.setCount(size);
+
+                        int32_t* dst = (int32_t*)val->bufferData.getBuffer();
+                        for (int i = 0; i < size; ++i)
+                        {
+                            dst[i] = hasRange ? rand->nextInt32InRange(minValue, maxValue) : rand->nextInt32();
+                        }
+                        break;
+                    }
+                    case SLANG_SCALAR_TYPE_UINT32:
+                    {
+                        bool hasRange = false;
+                        uint32_t minValue = 0;
+                        uint32_t maxValue = 0xffffffff;
+
+                        if (parser.LookAhead(","))
+                        {
+                            parser.ReadToken();
+                            minValue = parser.ReadUInt();
+
+                            hasRange = true;
+
+                            if (parser.LookAhead(","))
+                            {
+                                parser.ReadToken();
+                                maxValue = parser.ReadUInt();
+                            }
+                        }
+
+                        SLANG_ASSERT(minValue <= maxValue);
+                        maxValue = (maxValue >= minValue) ? maxValue : minValue;
+
+                        // Generate the data
+                        val->bufferData.setCount(size);
+
+                        uint32_t* dst = (uint32_t*)val->bufferData.getBuffer();
+                        for (int i = 0; i < size; ++i)
+                        {
+                            dst[i] = hasRange ? rand->nextUInt32InRange(minValue, maxValue) : rand->nextUInt32();
+                        }
+
+                        break;
+                    }
+                    case SLANG_SCALAR_TYPE_FLOAT32:
+                    {
+                        float minValue = -1.0f;
+                        float maxValue = 1.0f;
+                                            
+                        if (parser.LookAhead(","))
+                        {
+                            parser.ReadToken();
+                            minValue = parser.ReadFloat();
+
+                            if (parser.LookAhead(","))
+                            {
+                                parser.ReadToken();
+                                maxValue = parser.ReadFloat();
+                            }
+                        }
+
+                        SLANG_ASSERT(minValue <= maxValue);
+                        maxValue = (maxValue >= minValue) ? maxValue : minValue;
+
+                        // Generate the data
+                        val->bufferData.setCount(size);
+
+                        float* dst = (float*)val->bufferData.getBuffer();
+                        for (int i = 0; i < size; ++i)
+                        {
+                            dst[i] = (rand->nextUnitFloat32() * (maxValue - minValue)) + minValue;
+                        }
+                        break;
+                    }
+                }
+
+                // Read the range
+
+                parser.Read(")");
+            }
+            else if(word == "format")
+            {
+                val->bufferDesc.format = parseFormatOption(parser);
+            }
+            else
+            {
+                return parseOption(parser, word, static_cast<ShaderInputLayout::DataValBase*>(val));
+            }
+            return SLANG_OK;
+        }
+
         SlangResult parseOption(Misc::TokenReader& parser, String const& word, ShaderInputLayout::ObjectVal* val)
         {
             if( word == "type" )
@@ -643,6 +795,19 @@ namespace renderer_test
                 RefPtr<ShaderInputLayout::BufferVal> val = new ShaderInputLayout::BufferVal;
                 val->bufferDesc.type = InputBufferType::StorageBuffer;
                 maybeParseOptions(parser, val.Ptr());
+                return val;
+            }
+            else if (parser.AdvanceIf("tmp"))
+            {
+                RefPtr<ShaderInputLayout::TmpVal> val = new ShaderInputLayout::TmpVal;
+                val->bufferDesc.type = InputBufferType::StorageBuffer;
+                maybeParseOptions(parser, val.Ptr());
+                return val;
+            }
+            else if (parser.AdvanceIf("tmp2"))
+            {
+                RefPtr<ShaderInputLayout::Tmp2Val> val = new ShaderInputLayout::Tmp2Val;
+                // maybeParseOptions(parser, val.Ptr());
                 return val;
             }
             else if (parser.AdvanceIf("Texture1D"))
